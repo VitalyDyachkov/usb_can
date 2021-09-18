@@ -1,0 +1,93 @@
+		if(data_buff_input_usb[38] == 'S' && data_buff_input_usb[39] == 'P')
+	{
+		//if(data_buff_input_usb[39] == 'P')
+		//{
+			uint16_t period = 0;
+			uint16_t temp_data = 0;
+			uint16_t number = 0;
+			uint16_t factor = 10000;
+			
+			number  = (0x0f & data_buff_input_usb[41]) * 10;
+			number +=  0x0f & data_buff_input_usb[42];
+		
+			period  = (0x0f & data_buff_input_usb[44]) * 100;
+			period += (0x0f & data_buff_input_usb[45]) * 10;
+			period  += 0x0f & data_buff_input_usb[46];
+			
+			/*если сообщение одно то сразу отправим  его в шину*/
+			if(number == 1)
+			{
+				//xQueueSend(queue_to_can,&send_to_can_stct,xHigherPriorityTaskWoken);
+				xQueueSend(queue_from_timer,&send_to_can_stct,portMAX_DELAY);
+			}
+			/*иначе занесем его параметры в структуру*/
+			else
+			{
+				send_to_can_whith_period.reload_period = send_to_can_whith_period.period = period;
+				send_to_can_whith_period.number = number;
+				for(int i = 0; i < number; i++)
+				{
+					xQueueSend(queue_from_timer,&send_to_can_stct,portMAX_DELAY);
+				}
+					//	LoadTIMPeriod(period);
+			}
+		//}
+	}
+	/*иначе передаем в шину из файла*/
+	else
+	{
+		/*если пакет первый то сразу отправим  его в шину*/
+			if(!TimePack.not_empty_flag)
+			{
+				//xQueueSend(queue_to_can,&send_to_can_stct,xHigherPriorityTaskWoken);
+				/*внесем временную метку в структуру для последующих расчетов периода посылки*/
+				TimePack.minute = (uint8_t)  u32_ASCII_ToInt(&data_buff_input_usb[POSITION_MIN],2);
+				TimePack.secund = (uint8_t)  u32_ASCII_ToInt(&data_buff_input_usb[POSITION_SEC],2);
+				TimePack.msec =   (uint16_t) u32_ASCII_ToInt(&data_buff_input_usb[POSITION_mSEC],3);
+			//	TimePack.usec =   (uint16_t) u32_ASCII_ToInt(&data_buff_input_usb[POSITION_uSEC],3);	
+				xQueueSend(queue_from_timer,&send_to_can_stct,portMAX_DELAY);
+				xSemaphoreGiveFromISR(xSemaphore,&xHigherPriorityTaskWoken);
+				TimePack.not_empty_flag = true;
+			}
+			/*иначе произведем расчет временной константы и загрузим ее в регистр таймера*/
+			else
+			{
+				uint16_t period = 0;
+				uint8_t minute = 0;
+				uint8_t secunde = 0;
+				uint16_t msec = 0;
+				uint16_t usec = 0;
+				uint32_t time_in_ms = 0;
+				uint32_t store_time_in_ms = 0;
+				
+				minute =  (uint8_t)  u32_ASCII_ToInt(&data_buff_input_usb[POSITION_MIN],2);
+				secunde = (uint8_t)  u32_ASCII_ToInt(&data_buff_input_usb[POSITION_SEC],2);
+				msec = (uint16_t) u32_ASCII_ToInt(&data_buff_input_usb[POSITION_mSEC],3);
+				
+				//usec = (uint16_t) u32_ASCII_ToInt(&data_buff_input_usb[POSITION_uSEC],3);	
+			
+				time_in_ms = minute * 60000;
+				time_in_ms += secunde * 1000; 
+				time_in_ms += msec;
+			
+				store_time_in_ms = TimePack.minute * 60000;
+				store_time_in_ms += TimePack.secund * 1000;
+				store_time_in_ms += TimePack.msec;
+			
+				TimePack.minute = minute;
+				TimePack.secund = secunde;
+				TimePack.msec = msec;
+				
+				time_in_ms = time_in_ms - store_time_in_ms; 
+				/*внесем сообщение в очередь для передачи*/
+				if(xQueueSend(queue_from_timer,&send_to_can_stct,portMAX_DELAY) == errQUEUE_FULL )
+				{
+					error_msg_dbg++;
+				}
+				/*внесем период отправки в очередь*/
+				if(xQueueSend (queue_periods,&time_in_ms,portMAX_DELAY) == errQUEUE_FULL)
+				{
+					error_time_dbg++;
+				}
+			}
+	}
